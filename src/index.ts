@@ -1,32 +1,60 @@
-/**
- * Welcome to Cloudflare Workers! This is your first worker.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
-
-export interface Env {
-	// Example binding to KV. Learn more at https://developers.cloudflare.com/workers/runtime-apis/kv/
-	// MY_KV_NAMESPACE: KVNamespace;
-	//
-	// Example binding to Durable Object. Learn more at https://developers.cloudflare.com/workers/runtime-apis/durable-objects/
-	// MY_DURABLE_OBJECT: DurableObjectNamespace;
-	//
-	// Example binding to R2. Learn more at https://developers.cloudflare.com/workers/runtime-apis/r2/
-	// MY_BUCKET: R2Bucket;
-	//
-	// Example binding to a Service. Learn more at https://developers.cloudflare.com/workers/runtime-apis/service-bindings/
-	// MY_SERVICE: Fetcher;
-	//
-	// Example binding to a Queue. Learn more at https://developers.cloudflare.com/queues/javascript-apis/
-	// MY_QUEUE: Queue;
-}
+export type Env = {
+	kv: KVNamespace;
+};
 
 export default {
-	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-		return new Response('Hello World!');
+	async fetch(
+		request: Request,
+		env: Env,
+		ctx: ExecutionContext,
+	): Promise<Response> {
+		const url = new URL(request.url);
+
+		const path = url.pathname.split("/").filter((p) => p);
+
+		const states = await env.kv.get<{ name: string; abbreviation: string }[]>(
+			"states",
+			"json",
+		);
+
+		if (!states)
+			return Response.json({ message: "States not found" }, { status: 404 });
+
+		if (path.length === 1 && path[0] === "states") return Response.json(states);
+
+		if (path.length === 2 && path[0] === "states") {
+			const citiesDatabase = await env.kv.get<
+				{
+					name: string;
+					lat: number;
+					lon: number;
+					state: string;
+				}[]
+			>("cities", "json");
+
+			console.log(citiesDatabase);
+
+			if (!citiesDatabase)
+				return Response.json({ message: "Cities not found" }, { status: 404 });
+
+			const statePath = decodeURI(path[1].toLowerCase());
+
+			const state = states.find(
+				(state) =>
+					statePath === state.name.toLowerCase() ||
+					statePath === state.abbreviation.toLowerCase(),
+			);
+
+			const cities = citiesDatabase
+				.filter((city) => state?.abbreviation === city.state)
+				.filter(
+					(location, index, array) =>
+						array.findIndex((obj) => obj.name === location.name) === index,
+				);
+
+			return Response.json(cities);
+		}
+
+		return Response.json({ message: "Route not found" }, { status: 404 });
 	},
 };
